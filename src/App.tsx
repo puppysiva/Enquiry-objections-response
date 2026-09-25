@@ -22,6 +22,25 @@ import { ComparisonModal } from './components/ComparisonModal';
 import { UserInterventionModal } from './components/UserInterventionModal';
 import { ExportModal } from './components/ExportModal';
 
+// Safe fetch helper to handle HTML 404/500 proxy responses gracefully
+async function safeFetchJson(url: string, options: RequestInit) {
+  const res = await fetch(url, options);
+  const text = await res.text();
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch (_e) {
+    if (!res.ok) {
+      throw new Error(`Server returned status ${res.status}: ${res.statusText || 'Endpoint unavailable'}`);
+    }
+    throw new Error(`Unexpected server response format from ${url}`);
+  }
+  if (!res.ok) {
+    throw new Error(data?.error || `Request failed with status ${res.status}`);
+  }
+  return data;
+}
+
 export default function App() {
   const [session, setSession] = useState<DialecticSession | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -83,18 +102,11 @@ export default function App() {
     setSession(initialSession);
 
     try {
-      const res = await fetch('/api/dialectic/initial-response', {
+      const initialData = await safeFetchJson('/api/dialectic/initial-response', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question }),
       });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to generate initial response');
-      }
-
-      const initialData = await res.json();
 
       const round0: DialecticRound = {
         roundIndex: 0,
@@ -141,7 +153,7 @@ export default function App() {
       if (!lastRound.objection && !lastRound.satisfaction) {
         setSession((prev) => (prev ? { ...prev, status: 'objecting' } : null));
 
-        const res = await fetch('/api/dialectic/evaluate-and-object', {
+        const evalData = await safeFetchJson('/api/dialectic/evaluate-and-object', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -152,13 +164,6 @@ export default function App() {
             personaId: session.personaId,
           }),
         });
-
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || 'Evaluation failed');
-        }
-
-        const evalData = await res.json();
 
         // Check if Satisfactory
         if (evalData.isSatisfactory) {
@@ -249,7 +254,7 @@ export default function App() {
       else if (lastRound.objection && !session.isFinished) {
         setSession((prev) => (prev ? { ...prev, status: 'refining' } : null));
 
-        const res = await fetch('/api/dialectic/refine-response', {
+        const refineData = await safeFetchJson('/api/dialectic/refine-response', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -259,13 +264,6 @@ export default function App() {
             roundsHistory: currentRounds,
           }),
         });
-
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || 'Refinement failed');
-        }
-
-        const refineData = await res.json();
 
         const newRound: DialecticRound = {
           roundIndex: currentRounds.length,
@@ -307,7 +305,7 @@ export default function App() {
     finishReason: 'satisfactory' | 'max_objections_reached'
   ) => {
     try {
-      const res = await fetch('/api/dialectic/synthesize', {
+      const synthesisData: FinalSynthesis = await safeFetchJson('/api/dialectic/synthesize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -316,12 +314,6 @@ export default function App() {
           finishReason,
         }),
       });
-
-      if (!res.ok) {
-        throw new Error('Failed to generate synthesis');
-      }
-
-      const synthesisData: FinalSynthesis = await res.json();
 
       setSession((prev) => {
         if (!prev) return null;

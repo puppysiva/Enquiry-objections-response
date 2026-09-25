@@ -27,7 +27,27 @@ const ai = new GoogleGenAI({
 
 const MODEL_NAME = 'gemini-3.8-flash';
 
-// Helper to call Gemini with retry and fallback across supported flash models in case of transient 503 spikes
+// Helper to safely extract and parse JSON from Gemini response
+function safeParseJson(rawText: string | undefined): any {
+  if (!rawText) return {};
+  let cleaned = rawText.trim();
+  // Strip markdown code fences if present
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  }
+  try {
+    return JSON.parse(cleaned);
+  } catch (err) {
+    // Attempt to locate first { and last }
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      const extracted = cleaned.substring(firstBrace, lastBrace + 1);
+      return JSON.parse(extracted);
+    }
+    throw err;
+  }
+}
 async function callGeminiWithRetry(params: any, maxRetries = 3) {
   const fallbackModels = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
   let lastError: any;
@@ -106,7 +126,7 @@ Provide your initial response and key analytical pillars.`;
       },
     });
 
-    const parsed = JSON.parse(response.text || '{}');
+    const parsed = safeParseJson(response.text);
     res.json(parsed);
   } catch (err: unknown) {
     console.error('Error generating initial response:', err);
@@ -212,6 +232,7 @@ Determine if this response is fully SATISFACTORY or if an OBJECTION #${currentOb
                 targetAspect: { type: Type.STRING, description: 'The exact premise or sentence being attacked' },
                 challengeQuestion: { type: Type.STRING, description: 'Direct question testing the proposer in the next turn' },
               },
+              required: ['title', 'critique', 'vulnerabilityType', 'severity', 'challengeQuestion'],
             },
           },
           required: ['isSatisfactory', 'score', 'satisfactionReasoning', 'strengthsRecognized'],
@@ -219,9 +240,16 @@ Determine if this response is fully SATISFACTORY or if an OBJECTION #${currentOb
       },
     });
 
-    const parsed = JSON.parse(response.text || '{}');
-    if (!parsed.isSatisfactory && parsed.objection) {
+    const parsed = safeParseJson(response.text);
+    if (!parsed.isSatisfactory) {
+      if (!parsed.objection) {
+        parsed.objection = {};
+      }
       parsed.objection.objectionNumber = currentObjectionNumber;
+      parsed.objection.title = parsed.objection.title || `Objection #${currentObjectionNumber}: Foundational Counter-Premise`;
+      parsed.objection.critique = parsed.objection.critique || parsed.satisfactionReasoning || 'A critical vulnerability remains in this argument.';
+      parsed.objection.challengeQuestion = parsed.objection.challengeQuestion || 'How does this position account for this counter-argument?';
+      parsed.objection.targetAspect = parsed.objection.targetAspect || '';
 
       // Sanitize vulnerabilityType
       const rawType = String(parsed.objection.vulnerabilityType || '').toLowerCase();
@@ -317,7 +345,7 @@ Provide your concession, counter-defense, and the complete refined response.`;
       },
     });
 
-    const parsed = JSON.parse(response.text || '{}');
+    const parsed = safeParseJson(response.text);
     res.json(parsed);
   } catch (err: unknown) {
     console.error('Error refining response:', err);
@@ -394,7 +422,7 @@ Synthesize this dialectic journey into a definitive final verdict.`;
       },
     });
 
-    const parsed = JSON.parse(response.text || '{}');
+    const parsed = safeParseJson(response.text);
     parsed.totalObjectionsFaced = objectionCount;
     parsed.outcome = finishReason === 'satisfactory' ? 'satisfaction_reached' : 'max_objections_exhausted';
 
