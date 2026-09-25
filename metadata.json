@@ -1,0 +1,6 @@
+{
+  "name": "Dialectic AI - Automated Objection & Refinement Engine",
+  "description": "An interactive dialectic exploration app where an AI answers user questions and an automated adversarial agent stresses and objects to the response until reaching satisfaction or five objections.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
